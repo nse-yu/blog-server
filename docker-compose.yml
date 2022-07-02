@@ -12,7 +12,7 @@ services:
     volumes:
       - /mnt/c/Users/boban/documents/database:/tmp
   web:
-    image: blog-web:latest
+    image: ny2244/blog-web:ver0.0.2
     ports:
       - "3000:3000"
     restart: always
