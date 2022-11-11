@@ -22,7 +22,9 @@ public class DocsAccessor {
 
     private final DocsRepository    repository;
     private final DocsAccessor.SearchCallback callback;
-    private final GoogleAuth auth;
+
+
+    private GoogleAuth auth;
 
 
     public DocsAccessor(DocsAccessBuilder builder) {
@@ -43,6 +45,12 @@ public class DocsAccessor {
 
         }
 
+    }
+    public GoogleAuth getAuth() {
+        return auth;
+    }
+    public void setAuth(GoogleAuth auth){
+        this.auth = auth;
     }
 
     public boolean  isAuthorized() {

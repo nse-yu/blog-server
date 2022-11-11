@@ -2,6 +2,8 @@ package com.example.blogserver;
 
 import com.example.docs.DocsAccessBuilder;
 import com.example.docs.DocsAccessor;
+import com.example.drive.DriveAccessBuilder;
+import com.example.drive.DriveAccessor;
 import com.example.exception.ApiRequestException;
 import com.google.api.client.auth.oauth2.TokenResponse;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
@@ -14,7 +16,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.servlet.http.HttpServletRequest;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -26,7 +27,8 @@ import java.util.UUID;
 @Controller
 public class BlogController {
 	private final JdbcService service;
-	private DocsAccessor accessor;
+	private DocsAccessor 	docsAccessor;
+	private DriveAccessor 	driveAccessor;
 	private TokenResponse response;
 	private String title;
 	private String body;
@@ -149,9 +151,8 @@ public class BlogController {
 		} catch (IOException e) {
 			throw new ApiRequestException(
 					e.getClass().toString()+"has thrown because of your request's mistakes.",e);
-		} finally {
-			System.out.println("finally-block has executed.");
 		}
+
 		return all;
 	}
 
@@ -161,28 +162,36 @@ public class BlogController {
 	public ResponseEntity<String> generateDocument(
 			@RequestParam("title") String title,
 			@RequestParam("body") String body,
-			HttpServletRequest request
+			@RequestParam("origin") String origin
 	){
 
 		// obtain form values
 		this.title  = title;
 		this.body   = body;
-		this.origin = request.getHeader("referer");
+		this.origin = origin;
 
-		System.out.printf("Accepted values: [title: %s, body: %s]%n", title, body);
+		//System.out.printf("Accepted values: [title: %s, body: %s]%n", title, body);
 
 		// create Accessor for Google Docs API
-		accessor = DocsAccessBuilder
-				.init("docs-desktop-app")
+		docsAccessor = DocsAccessBuilder
+				.init("docs-web-app")
 				.setCallback(System.out::println)
 				.build();
 
+		driveAccessor = DriveAccessBuilder
+				.init("drive-web-app")
+				.setCallback(System.out::println)
+				.build();
+
+		// sharing auth instances
+		driveAccessor.setAuth(docsAccessor.getAuth());
+
 		// authorization check before accessing API
-		if(accessor.isAuthorized()){
+		if(!docsAccessor.isAuthorized()){
 
 			// trying to redirect browser to the Google auth page
-			System.out.println(accessor.redirectURI());
-			return ResponseEntity.status(HttpStatus.SEE_OTHER).body(accessor.redirectURI());
+			System.out.println(docsAccessor.redirectURI());
+			return ResponseEntity.status(HttpStatus.SEE_OTHER).body(docsAccessor.redirectURI());
 
 		}
 
@@ -190,12 +199,25 @@ public class BlogController {
 		Document doc;
 		try {
 
-			doc = accessor.create(title, body);
+			doc = docsAccessor.create(title, body);
 
 		} catch (IOException e) {
 
 			if(((GoogleJsonResponseException) e).getStatusCode() == HttpStatus.UNAUTHORIZED.value())
-				return ResponseEntity.status(HttpStatus.SEE_OTHER).body(accessor.redirectURI());
+				return ResponseEntity.status(HttpStatus.SEE_OTHER).body(docsAccessor.redirectURI());
+			else
+				throw new RuntimeException(e);
+
+		}
+
+		try {
+
+			driveAccessor.moveFileToFolder(doc.getDocumentId(), "1FWUwm_6AeRu_LlPNGoarW8Sgwj8G0ai4");
+
+		} catch (IOException e) {
+
+			if(((GoogleJsonResponseException) e).getStatusCode() == HttpStatus.UNAUTHORIZED.value())
+				return ResponseEntity.status(HttpStatus.SEE_OTHER).body(driveAccessor.redirectURI());
 			else
 				throw new RuntimeException(e);
 
@@ -211,17 +233,27 @@ public class BlogController {
 
 		// there is no response for this session
 		if(response == null)
-			response = accessor.requestNewToken(code);
+			response = docsAccessor.requestNewToken(code);
 
 		// apply for the user authorization using Token response
-		accessor.authorize(response);
+		docsAccessor.authorize(response);
 		response = null;
 
 		// create new documents and get new instances
 		Document doc = null;
 		try {
 
-			doc = accessor.create(title, body);
+			doc = docsAccessor.create(title, body);
+
+		} catch (IOException e) {
+
+			throw new RuntimeException(e);
+
+		}
+
+		try {
+
+			driveAccessor.moveFileToFolder(doc.getDocumentId(), "1FWUwm_6AeRu_LlPNGoarW8Sgwj8G0ai4");
 
 		} catch (IOException e) {
 
