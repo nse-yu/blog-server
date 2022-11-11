@@ -1,20 +1,23 @@
 version: "2.2"
 
 services:
-  server:
+  blog-server:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: server
+    image: ny2244/blog-server
     ports:
       - "5000:5000"
     restart: always
     volumes:
-      - /mnt/c/Users/boban/documents/database:/tmp
-  web:
-    image: ny2244/blog-web:ver0.0.2
+      - C:/Users/boban/documents/database:/tmp
+    container_name: blog-server
+  blog-web:
+    image: ny2244/blog-web
     ports:
       - "3000:3000"
     restart: always
+    container_name: blog-web
     depends_on:
-      - server
+      - blog-server
+

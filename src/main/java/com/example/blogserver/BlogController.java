@@ -1,5 +1,20 @@
 package com.example.blogserver;
 
+import com.example.docs.DocsAccessBuilder;
+import com.example.docs.DocsAccessor;
+import com.example.exception.ApiRequestException;
+import com.google.api.client.auth.oauth2.TokenResponse;
+import com.google.api.client.googleapis.json.GoogleJsonResponseException;
+import com.google.api.services.docs.v1.model.Document;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import javax.servlet.http.HttpServletRequest;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -8,30 +23,25 @@ import java.util.Calendar;
 import java.util.List;
 import java.util.UUID;
 
-import com.example.exception.ApiRequestException;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
-
-@RestController
+@Controller
 public class BlogController {
 	private final JdbcService service;
+	private DocsAccessor accessor;
+	private TokenResponse response;
+	private String title;
+	private String body;
+	private String origin;
+
+
 	@Autowired
 	public BlogController(JdbcService service) {
 		this.service = service;
 	}
+
 	
 	@CrossOrigin
 	@GetMapping("/article/{id}")
+	@ResponseBody
 	public PostArticle getArticle(@PathVariable String id) {
 		PostArticle article = service.findById(id);
 		
@@ -44,11 +54,13 @@ public class BlogController {
 	
 	@CrossOrigin
 	@GetMapping("/article/all")
+	@ResponseBody
 	public List<PostArticle> getArticles(){
 		return service.findAll();
 	}
 	
 	@CrossOrigin
+	@ResponseBody
 	@DeleteMapping("/article/{articleID}/delete")
 	public ResponseEntity<Boolean> deleteArticle(@PathVariable String articleID){
 		System.out.println("delete: "+articleID);
@@ -60,6 +72,7 @@ public class BlogController {
 	}
 	
 	@CrossOrigin
+	@ResponseBody
 	@GetMapping("/article/search")
 	public List<PostArticle> getArticleByRegex(@RequestParam("q") String target){
 		List<PostArticle> articles;
@@ -72,12 +85,14 @@ public class BlogController {
 	}
 	
 	@CrossOrigin
+	@ResponseBody
 	@GetMapping("/img/all")
 	public List<String> getImgURLs(){
 		return service.findAllOnlyImgURL();
 	}
 	
 	@CrossOrigin
+	@ResponseBody
 	@PostMapping(value="/img/upload",consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
 	public ResponseEntity<Boolean> uploadImg(@RequestParam("img") MultipartFile file){
 		boolean status = service.saveImg(file);
@@ -85,12 +100,14 @@ public class BlogController {
 	}
 	
 	@CrossOrigin
+	@ResponseBody
 	@GetMapping("/tag/{tagID}")
 	public List<PostArticle> getArticlesByTagId(@PathVariable Integer tagID){
 		return service.findByTagId(tagID);
 	}
 	
 	@CrossOrigin
+	@ResponseBody
 	@PostMapping(value="/article/post",consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
 	public ResponseEntity<Boolean> postArticle(
 			@RequestParam("img") MultipartFile file,
@@ -122,6 +139,7 @@ public class BlogController {
 	}
 	
 	@CrossOrigin
+	@ResponseBody
 	@GetMapping("/img/{imgURL}")
 	public byte[] sendImgResource(@PathVariable String imgURL) throws ApiRequestException {
 		byte[] all;
@@ -135,5 +153,84 @@ public class BlogController {
 			System.out.println("finally-block has executed.");
 		}
 		return all;
+	}
+
+	@CrossOrigin
+	@ResponseBody
+	@PostMapping(value = "/docs/generate", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
+	public ResponseEntity<String> generateDocument(
+			@RequestParam("title") String title,
+			@RequestParam("body") String body,
+			HttpServletRequest request
+	){
+
+		// obtain form values
+		this.title  = title;
+		this.body   = body;
+		this.origin = request.getHeader("referer");
+
+		System.out.printf("Accepted values: [title: %s, body: %s]%n", title, body);
+
+		// create Accessor for Google Docs API
+		accessor = DocsAccessBuilder
+				.init("docs-desktop-app")
+				.setCallback(System.out::println)
+				.build();
+
+		// authorization check before accessing API
+		if(accessor.isAuthorized()){
+
+			// trying to redirect browser to the Google auth page
+			System.out.println(accessor.redirectURI());
+			return ResponseEntity.status(HttpStatus.SEE_OTHER).body(accessor.redirectURI());
+
+		}
+
+		// create new documents and get new instances
+		Document doc;
+		try {
+
+			doc = accessor.create(title, body);
+
+		} catch (IOException e) {
+
+			if(((GoogleJsonResponseException) e).getStatusCode() == HttpStatus.UNAUTHORIZED.value())
+				return ResponseEntity.status(HttpStatus.SEE_OTHER).body(accessor.redirectURI());
+			else
+				throw new RuntimeException(e);
+
+		}
+
+		return ResponseEntity.status(HttpStatus.CREATED).body(doc.getTitle());
+	}
+
+	@RequestMapping(value = "/docs/redirect", method = RequestMethod.GET)
+	public String redirectedAndGenerate(
+			@RequestParam("code") String code
+	){
+
+		// there is no response for this session
+		if(response == null)
+			response = accessor.requestNewToken(code);
+
+		// apply for the user authorization using Token response
+		accessor.authorize(response);
+		response = null;
+
+		// create new documents and get new instances
+		Document doc = null;
+		try {
+
+			doc = accessor.create(title, body);
+
+		} catch (IOException e) {
+
+			throw new RuntimeException(e);
+
+		}
+
+		System.out.println("redirect to "+origin);
+
+		return "redirect:"+origin;
 	}
 }
